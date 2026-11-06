@@ -324,6 +324,43 @@
     URL.revokeObjectURL(url);
   }
 
+  // 雲端教材同步：發布全班課文教材到 Firestore
+  async function publishClassMaterials(classId, materials) {
+    if (!classId) throw new Error('請提供班級代碼');
+    const cleanClass = classId.toString().trim();
+    if (isFirebaseReady && firestoreDb) {
+      try {
+        await firestoreDb.collection('class_materials').doc(cleanClass).set({
+          classId: cleanClass,
+          materials: materials || [],
+          updatedAt: new Date().toISOString()
+        });
+        return { success: true, mode: 'cloud' };
+      } catch (err) {
+        console.warn('雲端儲存教材失敗：', err);
+        return { success: false, mode: 'error', error: err.message };
+      }
+    }
+    return { success: false, mode: 'offline' };
+  }
+
+  // 雲端教材同步：學生端從 Firestore 讀取班級課文教材
+  async function fetchClassMaterials(classId) {
+    if (!classId) return null;
+    const cleanClass = classId.toString().trim();
+    if (isFirebaseReady && firestoreDb) {
+      try {
+        const doc = await firestoreDb.collection('class_materials').doc(cleanClass).get();
+        if (doc.exists) {
+          return doc.data();
+        }
+      } catch (err) {
+        console.warn('從 Firestore 載入班級教材失敗：', err);
+      }
+    }
+    return null;
+  }
+
   // 自動在頁面載入時嘗試初始化
   document.addEventListener('DOMContentLoaded', () => {
     initFirebase();
@@ -345,6 +382,8 @@
     getStudentRecords,
     getClassRecords,
     getLocalRecords,
-    exportRecordsToCsv
+    exportRecordsToCsv,
+    publishClassMaterials,
+    fetchClassMaterials
   };
 })();

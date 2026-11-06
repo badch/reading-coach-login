@@ -575,65 +575,241 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // 產生自帶教材封包的學生直達網址
-  function generateStudentShareUrl() {
-    const customSamples = getCustomSamples();
-    if (customSamples.length === 0) {
-      alert('目前範例庫中尚未新增任何自訂課文！\n請先在上方「新增一篇自訂文章範例」或點擊「存為範例」，再投影給全班喔！');
-      return null;
+  // 取得目前欲分享之班級代碼
+  const shareClassCodeInput = document.getElementById('share-class-code-input');
+  const qrModeBadge = document.getElementById('qr-mode-badge');
+  const qrCodeStatusMsg = document.getElementById('qr-code-status-msg');
+  const btnQrDirectSite = document.getElementById('btn-qr-direct-site');
+  const btnQrCloudMaterials = document.getElementById('btn-qr-cloud-materials');
+
+  function getTargetClassCode() {
+    if (shareClassCodeInput && shareClassCodeInput.value.trim()) {
+      return shareClassCodeInput.value.trim();
     }
-    const token = encodeSamplesData(customSamples);
+    const student = window.ReadingCoachFirebase ? window.ReadingCoachFirebase.getCurrentStudent() : null;
+    if (student && student.classId && student.classId !== 'Google帳號') {
+      return student.classId;
+    }
+    return currentClassId || '301';
+  }
+
+  // 100% 防空白、安全可靠的 QRCode 渲染引擎 (含自動防溢位備援)
+  function renderSafeQRCode(container, targetUrl, size = 200) {
+    if (!container) return;
+    container.innerHTML = '';
+
+    let isSuccess = false;
+
+    // 優先使用本地 QRCode.js 引擎 (採用 CorrectLevel.L 獲得最低密度與最大黑白方塊，平板相機最好對焦)
+    if (window.QRCode) {
+      try {
+        new QRCode(container, {
+          text: targetUrl,
+          width: size,
+          height: size,
+          colorDark: '#1e1b4b',
+          colorLight: '#ffffff',
+          correctLevel: QRCode.CorrectLevel.L
+        });
+
+        // 檢查是否有產生有效的 canvas 或 img
+        const canvas = container.querySelector('canvas');
+        const img = container.querySelector('img');
+        if (canvas || (img && img.src)) {
+          isSuccess = true;
+        }
+      } catch (err) {
+        console.warn('QRCode 本地渲染因長度或瀏覽器異常拋出錯誤，無縫切換備援引擎：', err);
+        isSuccess = false;
+      }
+    }
+
+    // 備援保證機制：若本機 JS 引擎因字串過長或 DOM 限制無法產圖，使用高可用 CDN QR 引擎，100% 絕不留白！
+    if (!isSuccess) {
+      const safeApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&margin=4&data=${encodeURIComponent(targetUrl)}`;
+      container.innerHTML = `
+        <img src="${safeApiUrl}" alt="全班學生連線 QR Code" class="w-[${size}px] h-[${size}px] max-w-full rounded-xl shadow-xs" loading="eager" />
+      `;
+    }
+  }
+
+  // 產生學生直達網址（智慧模式：優先 Firebase 雲端短網址，長度極短永不溢位）
+  async function generateStudentShareUrl(forcedMode = 'auto') {
+    const classId = getTargetClassCode();
+    const customSamples = getCustomSamples();
     const base = window.location.origin + window.location.pathname;
-    return `${base}#share=${token}`;
+
+    // 模式 1：純網站首頁直達
+    if (forcedMode === 'site') {
+      return {
+        url: base,
+        mode: 'site',
+        desc: '直達網站入口：學生掃描後開啟智慧朗讀教練網站'
+      };
+    }
+
+    // 模式 2：Firebase 雲端教材同步 (推薦，長度只有約 50 個字元，QR Code 最清晰最好掃)
+    if (window.ReadingCoachFirebase && window.ReadingCoachFirebase.isFirebaseReady()) {
+      if (customSamples.length > 0) {
+        try {
+          await window.ReadingCoachFirebase.publishClassMaterials(classId, customSamples);
+        } catch (e) {
+          console.warn('發布班級教材至雲端提示：', e);
+        }
+      }
+      return {
+        url: `${base}?class=${encodeURIComponent(classId)}`,
+        mode: 'cloud',
+        desc: `☁️ 雲端同步模式：學生掃描後將自動載入【${classId} 班】專屬課文教材與設定！`
+      };
+    }
+
+    // 模式 3：若尚未連線 Firebase，使用本機自帶封包（短課文）或直達入口（長課文防溢位）
+    if (customSamples.length > 0) {
+      const token = encodeSamplesData(customSamples);
+      // 若 Token 小於 800 字元，安全放入 URL Hash
+      if (token.length < 800) {
+        return {
+          url: `${base}#share=${token}`,
+          mode: 'local_token',
+          desc: `自帶教材模式：已將 ${customSamples.length} 篇課文打包，掃描秒載入！`
+        };
+      }
+    }
+
+    // 預設或課文過長時：回傳帶有班級參數的簡潔直達網址，防爆碼
+    return {
+      url: `${base}?class=${encodeURIComponent(classId)}`,
+      mode: 'simple_class',
+      desc: `直達班級入口：學生掃描後將進入網站並綁定【${classId} 班】！`
+    };
+  }
+
+  // 顯示學生 QR Code 彈窗
+  async function showStudentQrCodePopup(forcedMode = 'auto') {
+    if (!qrCodePopup || !studentQrcodeBox) return;
+
+    qrCodePopup.classList.remove('hidden');
+    studentQrcodeBox.innerHTML = '<div class="text-xs text-slate-400 p-6 flex items-center justify-center"><i data-lucide="loader" class="w-4 h-4 mr-2 animate-spin text-indigo-500"></i>正在生成高畫質 QR Code...</div>';
+    if (window.lucide) window.lucide.createIcons();
+
+    if (shareClassCodeInput && !shareClassCodeInput.value) {
+      shareClassCodeInput.value = getTargetClassCode();
+    }
+
+    const shareData = await generateStudentShareUrl(forcedMode);
+    currentGeneratedShareUrl = shareData.url;
+
+    // 渲染 QR Code (大尺寸 200x200，保證清晰)
+    renderSafeQRCode(studentQrcodeBox, shareData.url, 200);
+
+    if (qrCodeStatusMsg) {
+      qrCodeStatusMsg.innerHTML = `<span class="font-semibold text-indigo-900">${escapeHTML(shareData.desc)}</span><br><span class="text-2xs text-slate-400 break-all">${escapeHTML(shareData.url)}</span>`;
+    }
+
+    if (qrModeBadge) {
+      if (shareData.mode === 'cloud') {
+        qrModeBadge.className = 'text-2xs font-semibold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200';
+        qrModeBadge.textContent = '🟢 雲端短碼模式 (極致清晰)';
+      } else {
+        qrModeBadge.className = 'text-2xs font-semibold px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200';
+        qrModeBadge.textContent = '🔵 課堂直達模式';
+      }
+    }
+
+    qrCodePopup.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  let currentGeneratedShareUrl = '';
+
+  // 投影學生 QR Code 按鈕事件
+  if (btnShowStudentQr) {
+    btnShowStudentQr.addEventListener('click', () => {
+      showStudentQrCodePopup('auto');
+    });
+  }
+
+  // 切換模式按鈕
+  if (btnQrDirectSite) {
+    btnQrDirectSite.addEventListener('click', () => {
+      showStudentQrCodePopup('site');
+    });
+  }
+
+  if (btnQrCloudMaterials) {
+    btnQrCloudMaterials.addEventListener('click', () => {
+      showStudentQrCodePopup('cloud');
+    });
   }
 
   // 複製學生直達網址
   if (btnCopyStudentLink) {
     btnCopyStudentLink.addEventListener('click', async () => {
-      const shareUrl = generateStudentShareUrl();
-      if (!shareUrl) return;
+      const shareData = await generateStudentShareUrl('auto');
+      const shareUrl = shareData.url;
       try {
         await navigator.clipboard.writeText(shareUrl);
-        alert(`📋 已複製學生直達網址！\n\n此網址已完整打包全部 ${getCustomSamples().length} 篇課文教材。\n傳到學生平板或通訊群組，任何瀏覽器點開 1 秒自動載入！`);
+        alert(`📋 已複製學生直達網址！\n\n網址：${shareUrl}\n傳到學生平板或群組，點開立刻同步！`);
       } catch (e) {
-        prompt('請手動複製下方自帶教材的學生直達網址：', shareUrl);
+        prompt('請手動複製下方學生直達網址：', shareUrl);
       }
     });
   }
 
-  // 投影學生 QR Code
-  if (btnShowStudentQr) {
-    btnShowStudentQr.addEventListener('click', () => {
-      const shareUrl = generateStudentShareUrl();
-      if (!shareUrl) return;
-
-      if (qrCodePopup && studentQrcodeBox) {
-        qrCodePopup.classList.remove('hidden');
-        studentQrcodeBox.innerHTML = '';
-        if (window.QRCode) {
-          new QRCode(studentQrcodeBox, {
-            text: shareUrl,
-            width: 170,
-            height: 170,
-            colorDark: '#312e81',
-            colorLight: '#ffffff',
-            correctLevel: QRCode.CorrectLevel.M
-          });
-        }
-        qrCodePopup.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }
-    });
-  }
-
-  // 學生端載入時（跨任何瀏覽器、任何裝置）自動解包並永久存入 localStorage
-  function checkAndLoadSharedSamples() {
+  // 學生端載入時（跨任何瀏覽器、任何裝置）自動解包或從 Firebase 雲端讀取班級教材
+  async function checkAndLoadSharedSamples() {
     let rawToken = '';
+    let targetClass = '';
     const hash = window.location.hash;
+    const params = new URLSearchParams(window.location.search);
+
+    // 檢查班級參數
+    if (params.get('class')) {
+      targetClass = params.get('class');
+    } else if (hash && hash.startsWith('#class=')) {
+      targetClass = hash.replace('#class=', '');
+    }
+
+    if (targetClass) {
+      currentClassId = targetClass;
+      localStorage.setItem('reading_coach_class_id', targetClass);
+      if (currentClassBadgeText) currentClassBadgeText.textContent = `${targetClass} 班同步`;
+      if (loginInputClass) loginInputClass.value = targetClass;
+
+      // 若 Firebase 已連線，自動嘗試從 Firestore 下載該班最新的課文教材
+      if (window.ReadingCoachFirebase && window.ReadingCoachFirebase.isFirebaseReady()) {
+        try {
+          const classData = await window.ReadingCoachFirebase.fetchClassMaterials(targetClass);
+          if (classData && Array.isArray(classData.materials) && classData.materials.length > 0) {
+            const current = getCustomSamples();
+            const currentTitles = new Set(current.map(i => i.title));
+            let addedCount = 0;
+            classData.materials.forEach(item => {
+              if (item.title && item.content && !currentTitles.has(item.title)) {
+                current.unshift(item);
+                addedCount++;
+              }
+            });
+            if (addedCount > 0) {
+              saveCustomSamples(current);
+              renderSampleButtons();
+              renderModalCustomList();
+              if (classData.materials[0]) {
+                loadSampleContent(classData.materials[0].title, classData.materials[0].content);
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('載入雲端教材提示：', e);
+        }
+      }
+    }
+
+    // 檢查 URL Token 自帶教材 (相容舊版)
     if (hash && hash.startsWith('#share=')) {
       rawToken = hash.replace('#share=', '');
-    } else {
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('share')) rawToken = params.get('share');
+    } else if (params.get('share')) {
+      rawToken = params.get('share');
     }
 
     if (rawToken) {
@@ -666,12 +842,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // 清理網址中的長 Hash，保持乾淨
         try {
-          history.replaceState(null, document.title, window.location.pathname);
+          history.replaceState(null, document.title, window.location.pathname + window.location.search);
         } catch (e) {}
-
-        setTimeout(() => {
-          alert(`🎉 恭喜！已成功載入老師分享的 ${imported.length} 篇課文教材！\n已永久儲存在您的裝置中，點擊上方範例即可開始朗讀！`);
-        }, 400);
       }
     }
   }
