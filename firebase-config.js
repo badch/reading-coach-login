@@ -4,15 +4,15 @@
  */
 
 (function () {
-  // 1. Firebase 預設配置物件 (使用者亦可透過介面或此處填入)
-  // 您可以在 Firebase Console (https://console.firebase.google.com/) 建立專案並取得設定
+  // 1. Firebase 預設配置物件 (已配置專案：reading-coach-a3dfb)
   const defaultFirebaseConfig = {
-    apiKey: "",
-    authDomain: "",
-    projectId: "",
-    storageBucket: "",
-    messagingSenderId: "",
-    appId: ""
+    apiKey: "AIzaSyCifbtjE42LomANuB7d0RYKjY91rhE6XPY",
+    authDomain: "reading-coach-a3dfb.firebaseapp.com",
+    projectId: "reading-coach-a3dfb",
+    storageBucket: "reading-coach-a3dfb.firebasestorage.app",
+    messagingSenderId: "990437777421",
+    appId: "1:990437777421:web:c6f677e32760528a663544",
+    measurementId: "G-E8T378HCFX"
   };
 
   const STORAGE_KEY_CONFIG = 'reading_coach_firebase_config';
