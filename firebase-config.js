@@ -18,6 +18,7 @@
   const STORAGE_KEY_CONFIG = 'reading_coach_firebase_config';
   const STORAGE_KEY_STUDENT = 'reading_coach_current_student';
   const STORAGE_KEY_LOCAL_SCORES = 'reading_coach_local_records';
+  const STORAGE_KEY_CLOUD_SAMPLES_CACHE = 'reading_coach_cloud_samples_cache_v1';
 
   let firebaseApp = null;
   let firestoreDb = null;
@@ -361,6 +362,143 @@
     return null;
   }
 
+  // ==========================================
+  // --- 雲端共用範例課文庫 (Cloud Sample Repository) ---
+  // ==========================================
+
+  // 即時監聽與自動同步雲端範例庫 (全班平板進入網站即自動讀取)
+  function subscribeCloudSamples(callback) {
+    if (!isFirebaseReady || !firestoreDb) {
+      // 離線回傳本機快取
+      const cached = localStorage.getItem(STORAGE_KEY_CLOUD_SAMPLES_CACHE);
+      if (cached && typeof callback === 'function') {
+        try { callback(JSON.parse(cached)); } catch(e){}
+      }
+      return null;
+    }
+
+    try {
+      const unsubscribe = firestoreDb.collection('reading_samples')
+        .orderBy('createdAt', 'desc')
+        .onSnapshot(async (snapshot) => {
+          // 若雲端為空，自動以標準精選課文進行初始寫入
+          if (snapshot.empty) {
+            console.log('🌱 雲端資料庫 reading_samples 首次連線，自動初始化預設範例教材...');
+            const seedSamples = [
+              {
+                id: 'sample_seed_poem',
+                title: '唐詩《春曉》',
+                content: '春眠不覺曉，處處聞啼鳥。\n夜來風雨聲，花落知多少。',
+                isDefault: true,
+                createdAt: new Date().toISOString()
+              },
+              {
+                id: 'sample_seed_essay',
+                title: '《雅量》節錄',
+                content: '朋友買了一件衣料，綠色的底子帶白色的圓點，一見面就高興地問我們：\n「你猜這像什麼？」\n「我看倒有點像棋盤似的。」我看了一看，說。\n「我看倒有點像稿紙。」我的一個朋友說。',
+                isDefault: true,
+                createdAt: new Date(Date.now() - 1000).toISOString()
+              },
+              {
+                id: 'sample_seed_prose',
+                title: '《背影》片段',
+                content: '我與父親不相見已二年餘了，我最不能忘記的是他的背影。\n那年冬天，祖母死了，父親的差使也交卸了，正是禍不單行的日子。',
+                isDefault: true,
+                createdAt: new Date(Date.now() - 2000).toISOString()
+              }
+            ];
+
+            const batch = firestoreDb.batch();
+            seedSamples.forEach(item => {
+              const ref = firestoreDb.collection('reading_samples').doc(item.id);
+              batch.set(ref, item);
+            });
+            await batch.commit();
+            return;
+          }
+
+          const samples = [];
+          snapshot.forEach(doc => {
+            samples.push(doc.data());
+          });
+
+          // 同步存入本機 LocalStorage 作為離線備援
+          try {
+            localStorage.setItem(STORAGE_KEY_CLOUD_SAMPLES_CACHE, JSON.stringify(samples));
+          } catch (e) {}
+
+          if (typeof callback === 'function') {
+            callback(samples);
+          }
+        }, (err) => {
+          console.warn('雲端範例庫即時監聽異常，降級使用本地快取：', err);
+          const cached = localStorage.getItem(STORAGE_KEY_CLOUD_SAMPLES_CACHE);
+          if (cached && typeof callback === 'function') {
+            try { callback(JSON.parse(cached)); } catch(e){}
+          }
+        });
+
+      return unsubscribe;
+    } catch (err) {
+      console.warn('註冊雲端範例即時監聽失敗：', err);
+      return null;
+    }
+  }
+
+  // 取得快取或雲端範例清單
+  async function getCloudSamples() {
+    if (isFirebaseReady && firestoreDb) {
+      try {
+        const snapshot = await firestoreDb.collection('reading_samples').orderBy('createdAt', 'desc').get();
+        if (!snapshot.empty) {
+          const list = [];
+          snapshot.forEach(doc => list.push(doc.data()));
+          return list;
+        }
+      } catch (e) {}
+    }
+    const cached = localStorage.getItem(STORAGE_KEY_CLOUD_SAMPLES_CACHE);
+    return cached ? JSON.parse(cached) : [];
+  }
+
+  // 儲存/新增一篇課文到雲端資料庫
+  async function saveCloudSample(sample) {
+    if (!sample || !sample.title || !sample.content) {
+      throw new Error('課文標題與內容不能為空！');
+    }
+    const sampleId = sample.id || ('sample_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4));
+    const sampleDoc = {
+      id: sampleId,
+      title: sample.title.trim(),
+      content: sample.content.trim(),
+      isDefault: !!sample.isDefault,
+      createdAt: sample.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    if (isFirebaseReady && firestoreDb) {
+      await firestoreDb.collection('reading_samples').doc(sampleId).set(sampleDoc);
+      return { success: true, mode: 'cloud', sample: sampleDoc };
+    }
+
+    return { success: true, mode: 'local', sample: sampleDoc };
+  }
+
+  // 刪除一篇雲端課文
+  async function deleteCloudSample(sampleId) {
+    if (!sampleId) return false;
+    if (isFirebaseReady && firestoreDb) {
+      try {
+        await firestoreDb.collection('reading_samples').doc(sampleId).delete();
+        return true;
+      } catch (err) {
+        console.error('刪除雲端範例失敗：', err);
+        return false;
+      }
+    }
+    return false;
+  }
+
   // 自動在頁面載入時嘗試初始化
   document.addEventListener('DOMContentLoaded', () => {
     initFirebase();
@@ -384,6 +522,10 @@
     getLocalRecords,
     exportRecordsToCsv,
     publishClassMaterials,
-    fetchClassMaterials
+    fetchClassMaterials,
+    subscribeCloudSamples,
+    getCloudSamples,
+    saveCloudSample,
+    deleteCloudSample
   };
 })();

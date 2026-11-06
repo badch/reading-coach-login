@@ -250,7 +250,12 @@ document.addEventListener('DOMContentLoaded', () => {
     updateCharCount();
   });
 
-  // --- 自訂範例庫核心邏輯 (支援 LocalStorage 持久化、自訂增刪、匯入/匯出) ---
+  // ==========================================
+  // --- 雲端範例庫核心邏輯 (支援 Firebase Cloud Firestore 即時監聽與 LocalStorage 雙向快取) ---
+  // ==========================================
+  const cloudSampleSyncIndicator = document.getElementById('cloud-sample-sync-indicator');
+  let cloudSamplesList = [];
+
   function getCustomSamples() {
     try {
       const data = localStorage.getItem(CUSTOM_SAMPLES_STORAGE_KEY);
@@ -267,6 +272,28 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (e) {
       console.error('Failed to save custom samples to localStorage:', e);
     }
+  }
+
+  // 取得目前所有生效的範例清單（優先雲端即時清單，其次本機快取與預設教材）
+  function getAllSamples() {
+    if (cloudSamplesList && cloudSamplesList.length > 0) {
+      return cloudSamplesList;
+    }
+    // 檢查雲端本機快取
+    try {
+      const cached = localStorage.getItem('reading_coach_cloud_samples_cache_v1');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {}
+
+    // 本地自訂範例與預設
+    const custom = getCustomSamples();
+    if (custom.length > 0) {
+      return [...custom, ...DEFAULT_SAMPLES];
+    }
+    return DEFAULT_SAMPLES;
   }
 
   // 載入某篇範例到文章文字框
@@ -289,60 +316,67 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!sampleButtonsWrapper) return;
     sampleButtonsWrapper.innerHTML = '';
 
-    const customSamples = getCustomSamples();
+    const samples = getAllSamples();
+    const isCloudActive = cloudSamplesList && cloudSamplesList.length > 0;
 
-    // 1. 預設範例按鈕
-    DEFAULT_SAMPLES.forEach(sample => {
+    if (cloudSampleSyncIndicator) {
+      if (isCloudActive) {
+        cloudSampleSyncIndicator.classList.remove('hidden');
+      } else {
+        cloudSampleSyncIndicator.classList.add('hidden');
+      }
+    }
+
+    samples.forEach(sample => {
       const btn = document.createElement('button');
       btn.type = 'button';
-      btn.className = 'sample-btn px-2.5 py-1 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition font-medium';
-      btn.textContent = sample.title;
-      btn.addEventListener('click', () => loadSampleContent(sample.title, sample.content, btn));
-      sampleButtonsWrapper.appendChild(btn);
-    });
+      const isDefault = !!sample.isDefault;
+      btn.className = isDefault
+        ? 'sample-btn px-2.5 py-1 text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition font-medium flex items-center shadow-2xs'
+        : 'sample-btn px-2.5 py-1 text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/80 rounded-lg transition font-medium flex items-center shadow-2xs';
 
-    // 2. 自訂範例按鈕
-    customSamples.forEach(sample => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'sample-btn px-2.5 py-1 text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/80 rounded-lg transition font-medium flex items-center shadow-2xs';
-      btn.title = `自訂範例：${sample.title} (${sample.content.length}字)`;
-      btn.innerHTML = `<span class="truncate max-w-[120px]">${escapeHTML(sample.title)}</span>`;
+      const charCount = (sample.content || '').replace(/[\s\p{P}]/gu, '').length;
+      btn.title = `《${sample.title}》 (${charCount} 字)`;
+      btn.innerHTML = `<span class="truncate max-w-[130px]">${escapeHTML(sample.title)}</span>`;
       btn.addEventListener('click', () => loadSampleContent(sample.title, sample.content, btn));
       sampleButtonsWrapper.appendChild(btn);
     });
 
     // 更新管理彈窗的計數
     if (customSampleCountBadge) {
-      customSampleCountBadge.textContent = `共 ${customSamples.length} 篇自訂`;
+      customSampleCountBadge.textContent = isCloudActive ? `雲端共 ${samples.length} 篇課文` : `共 ${samples.length} 篇課文`;
     }
   }
 
   // 渲染管理 Modal 裡的自訂範例列表
   function renderModalCustomList() {
     if (!modalCustomList) return;
-    const customSamples = getCustomSamples();
+    const samples = getAllSamples();
     modalCustomList.innerHTML = '';
 
-    if (customSamples.length === 0) {
+    if (samples.length === 0) {
       modalCustomList.innerHTML = `
         <div class="text-center py-6 text-xs text-slate-400 bg-white rounded-xl border border-dashed border-slate-200">
-          目前尚未新增自訂範例，可利用上方表單或點擊「存為範例」建立！
+          目前尚未新增課文範例，可利用上方表單或點擊「存為範例」建立！
         </div>
       `;
       return;
     }
 
-    customSamples.forEach((item, index) => {
+    samples.forEach((item) => {
       const row = document.createElement('div');
       row.className = 'p-3 bg-white rounded-xl border border-slate-200 shadow-2xs flex items-center justify-between gap-2 hover:border-indigo-200 transition';
       
-      const charNum = item.content.replace(/[\s\p{P}]/gu, '').length;
+      const charNum = (item.content || '').replace(/[\s\p{P}]/gu, '').length;
+      const isCloud = !item.isDefault;
       
       row.innerHTML = `
         <div class="flex-1 min-w-0">
-          <div class="text-xs font-bold text-slate-800 truncate">${escapeHTML(item.title)}</div>
-          <div class="text-2xs text-slate-400 truncate mt-0.5">${escapeHTML(item.content.slice(0, 30))}... (${charNum}字)</div>
+          <div class="text-xs font-bold text-slate-800 truncate flex items-center">
+            <span class="truncate">${escapeHTML(item.title)}</span>
+            ${isCloud ? '<span class="ml-1.5 text-2xs px-1.5 py-0.2 rounded bg-indigo-50 text-indigo-600 border border-indigo-100 font-semibold shrink-0">雲端</span>' : '<span class="ml-1.5 text-2xs px-1.5 py-0.2 rounded bg-slate-100 text-slate-500 font-semibold shrink-0">精選</span>'}
+          </div>
+          <div class="text-2xs text-slate-400 truncate mt-0.5">${escapeHTML((item.content || '').slice(0, 32))}... (${charNum}字)</div>
         </div>
         <div class="flex items-center space-x-1 shrink-0">
           <button type="button" class="btn-load-modal px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-2xs font-semibold rounded-lg transition">載入</button>
@@ -360,7 +394,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // 刪除按鈕
       row.querySelector('.btn-delete-modal').addEventListener('click', () => {
-        if (confirm(`確定要刪除範例「${item.title}」嗎？`)) {
+        if (confirm(`確定要刪除課文範例「${item.title}」嗎？\n刪除後全班平板將同步移除此課文。`)) {
           deleteCustomSample(item.id);
         }
       });
@@ -371,11 +405,20 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.lucide) window.lucide.createIcons();
   }
 
-  // 刪除自訂範例
-  function deleteCustomSample(id) {
+  // 刪除範例 (支援雲端與本機同步刪除)
+  async function deleteCustomSample(id) {
+    if (window.ReadingCoachFirebase) {
+      try {
+        await window.ReadingCoachFirebase.deleteCloudSample(id);
+      } catch (err) {
+        console.warn('雲端刪除範例提示：', err);
+      }
+    }
     let customSamples = getCustomSamples();
     customSamples = customSamples.filter(item => item.id !== id);
     saveCustomSamples(customSamples);
+
+    cloudSamplesList = cloudSamplesList.filter(item => item.id !== id);
     renderSampleButtons();
     renderModalCustomList();
   }
@@ -393,8 +436,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (sampleModal) sampleModal.classList.add('hidden');
   }
 
-  // 儲存新自訂範例
-  function handleSaveNewSample() {
+  // 儲存新課文範例 (同步發布至 Firebase Cloud Firestore)
+  async function handleSaveNewSample() {
     const title = (modalSampleTitle.value || '').trim();
     const content = (modalSampleContent.value || '').trim();
 
@@ -410,25 +453,60 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    const customSamples = getCustomSamples();
     const newItem = {
-      id: 'custom_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
+      id: 'sample_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4),
       title: title,
       content: content,
-      createdAt: Date.now()
+      createdAt: new Date().toISOString()
     };
 
-    customSamples.unshift(newItem); // 加到最前面
+    // 1. 若 Firebase 雲端可用，直接寫入 Cloud Firestore
+    if (window.ReadingCoachFirebase) {
+      try {
+        await window.ReadingCoachFirebase.saveCloudSample(newItem);
+      } catch (err) {
+        console.warn('雲端儲存範例提示：', err);
+      }
+    }
+
+    // 2. 本地備份
+    const customSamples = getCustomSamples();
+    customSamples.unshift(newItem);
     saveCustomSamples(customSamples);
 
     renderSampleButtons();
     renderModalCustomList();
 
-    // 清空表單
+    // 清空表單並關閉
     modalSampleTitle.value = '';
     modalSampleContent.value = '';
+    closeSampleModal();
 
-    alert(`🎉 成功新增自訂範例：「${title}」！已儲存至瀏覽器。`);
+    alert(`🎉 成功新增課文範例：「${title}」！\n已即時同步至 Firebase 雲端資料庫，全班所有平板開網頁將自動讀取！`);
+  }
+
+  // 初始化雲端課文庫自動即時監聽 (全班平板進入網站自動載入)
+  function initCloudSamplesAutoSync() {
+    if (!window.ReadingCoachFirebase) return;
+
+    const startSync = () => {
+      window.ReadingCoachFirebase.subscribeCloudSamples((samples) => {
+        if (Array.isArray(samples) && samples.length > 0) {
+          cloudSamplesList = samples;
+          renderSampleButtons();
+          renderModalCustomList();
+
+          // 學生/老師進入網站時，若文章框為空或為初始文章，自動載入雲端的第一篇課文！
+          const currentText = articleText.value.trim();
+          if (!currentText || currentText === DEFAULT_SAMPLES[0].content) {
+            loadSampleContent(samples[0].title, samples[0].content);
+          }
+        }
+      });
+    };
+
+    startSync();
+    setTimeout(startSync, 500);
   }
 
   // 快捷「存為範例」按鈕（文字框右下角）
@@ -2311,6 +2389,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 初始化學生登入 UI
   updateStudentUI();
+
+  // 啟用雲端課文庫即時監聽與自動載入 (進入網站自動讀取 Firestore 課文)
+  initCloudSamplesAutoSync();
 
   // 預設填入一首優美的示範詩詞，讓初次打開的使用者有完整體驗
   articleText.value = DEFAULT_SAMPLES[0].content;
