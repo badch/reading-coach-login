@@ -1,0 +1,140 @@
+/* 自定義與細節強化樣式 */
+
+body {
+  font-family: 'Noto Sans TC', system-ui, -apple-system, sans-serif;
+}
+
+/* 步驟徽章樣式 */
+.step-badge {
+  color: #64748b;
+  background-color: transparent;
+}
+
+.step-badge .step-num {
+  background-color: #f1f5f9;
+  color: #64748b;
+}
+
+.step-badge.active {
+  background-color: #eef2ff;
+  color: #4f46e5;
+}
+
+.step-badge.active .step-num {
+  background-color: #4f46e5;
+  color: #ffffff;
+}
+
+.step-badge.completed .step-num {
+  background-color: #10b981;
+  color: #ffffff;
+}
+
+/* 逐字比對標籤 */
+.diff-char {
+  display: inline-block;
+  padding: 0 3px;
+  margin: 1px 1px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.diff-char-correct {
+  background-color: #d1fae5;
+  color: #065f46;
+  border-bottom: 2px solid #10b981;
+}
+
+.diff-char-missed {
+  background-color: #ffe4e6;
+  color: #9f1239;
+  text-decoration: line-through;
+  opacity: 0.85;
+  border-bottom: 2px solid #f43f5e;
+}
+
+.diff-char-extra {
+  background-color: #fef3c7;
+  color: #92400e;
+  font-size: 0.85em;
+  padding: 0 4px;
+  border: 1px dashed #f59e0b;
+}
+
+.diff-punct {
+  color: #94a3b8;
+  padding: 0 1px;
+}
+
+/* 錄音波紋效果 */
+@keyframes voice-ripple {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+  }
+  70% {
+    transform: scale(1.05);
+    box-shadow: 0 0 0 20px rgba(239, 68, 68, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+}
+
+.recording-active {
+  animation: voice-ripple 1.5s infinite;
+}
+
+/* 朗讀時當前段落聚焦光暈 */
+.reading-highlight {
+  background: linear-gradient(120deg, rgba(238, 242, 255, 0.8) 0%, rgba(224, 231, 255, 0.5) 100%);
+  border-radius: 8px;
+  box-shadow: 0 0 0 3px #6366f1;
+}
+
+/* 滾動條自定義 */
+textarea::-webkit-scrollbar,
+#diff-visualization::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+textarea::-webkit-scrollbar-thumb,
+#diff-visualization::-webkit-scrollbar-thumb,
+#teleprompter-content-wrapper::-webkit-scrollbar-thumb {
+  background-color: #cbd5e1;
+  border-radius: 3px;
+}
+
+/* 朗讀讀稿窗專屬樣式 */
+.teleprompter-text {
+  font-family: 'Noto Serif TC', 'Songti TC', 'DFKai-SB', '標楷體', serif;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+/* 國語直排模式（由右至左、由上至下） */
+.teleprompter-vertical {
+  writing-mode: vertical-rl;
+  text-orientation: upright;
+  letter-spacing: 0.15em;
+  line-height: 2.2;
+  height: 240px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 8px 12px;
+}
+
+/* 錄音中讀稿窗光環激勵 */
+.teleprompter-recording {
+  border-color: #6366f1 !important;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25), 0 10px 15px -3px rgba(99, 102, 241, 0.1);
+  background-color: #ffffff !important;
+}
+
+/* 錄音期間保護頁面彈跳，避免 iOS Safari 捲動手勢觸發頁面刷新中斷音訊 */
+body.recording-active-mode {
+  overscroll-behavior-y: contain;
+}
