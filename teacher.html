@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>智慧朗讀教練 - 教師管理看板 (作答收集與學生成效)</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700;900&family=Noto+Serif+TC:wght@600;700&display=swap" rel="stylesheet">
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Canvas Confetti -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  <!-- Firebase App, Auth & Firestore (Compat CDN) -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+  <!-- Firebase Config & Data Layer -->
+  <script src="firebase-config.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col font-sans antialiased selection:bg-indigo-100 selection:text-indigo-900">
+
+  <!-- 頂部導航列 -->
+  <header class="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-40 shadow-xs">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+      <!-- 標誌與系統名稱 -->
+      <div class="flex items-center space-x-3">
+        <a href="index.html" class="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white shadow-md shadow-purple-200 hover:opacity-90 transition" title="點擊返回學生朗讀首頁">
+          <i data-lucide="graduation-cap" class="w-6 h-6"></i>
+        </a>
+        <div>
+          <div class="flex items-center space-x-2">
+            <h1 class="text-base sm:text-lg font-bold text-slate-900 leading-tight">教師管理看板</h1>
+            <span class="px-2 py-0.5 rounded-full text-2xs font-semibold bg-purple-100 text-purple-800 border border-purple-200">Teacher Portal</span>
+          </div>
+          <p class="text-xs text-slate-500">學生每一次作答即時收集 • 成績統計 • 逐字診斷</p>
+        </div>
+      </div>
+
+      <!-- 右側操作工具按鈕 -->
+      <div class="flex items-center space-x-2 sm:space-x-2.5">
+        <!-- 雲端同步狀態燈號 -->
+        <div id="badge-cloud-status" class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-2xs" title="Firebase 即時監聽中">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse mr-1.5"></span>
+          <span id="badge-cloud-text" class="hidden sm:inline">即時監聽中</span>
+          <span class="sm:hidden">即時</span>
+        </div>
+
+        <!-- 手動重新整理按鈕 -->
+        <button id="btn-manual-refresh" type="button" class="inline-flex items-center px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 transition shadow-2xs" title="手動重新載入最新資料">
+          <i data-lucide="refresh-cw" class="w-3.5 h-3.5 mr-1 text-slate-500"></i>
+          <span class="hidden sm:inline">重新整理</span>
+        </button>
+
+        <!-- 匯出 CSV 按鈕 -->
+        <button id="btn-export-csv" type="button" class="inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition" title="匯出 Excel / CSV 表格（含 UTF-8 BOM 繁中防亂碼）">
+          <i data-lucide="download" class="w-3.5 h-3.5 mr-1"></i>
+          <span>匯出 CSV</span>
+        </button>
+
+        <!-- Firebase 設定按鈕 -->
+        <button id="btn-open-firebase-modal" type="button" class="p-1.5 rounded-xl text-xs font-medium bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 transition shadow-2xs" title="Firebase 資料庫連線設定">
+          <i data-lucide="settings" class="w-4 h-4"></i>
+        </button>
+
+        <!-- 返回學生練習前台 -->
+        <a href="index.html" class="inline-flex items-center px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 transition shadow-2xs">
+          <i data-lucide="arrow-left" class="w-3.5 h-3.5 mr-1"></i>
+          <span class="hidden sm:inline">學生朗讀前台</span>
+          <span class="sm:hidden">前台</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <!-- 即時作答快訊 Toast 通知區 (當有新作答送達時浮現) -->
+  <div id="live-toast-container" class="fixed top-20 right-4 z-50 flex flex-col space-y-2 pointer-events-none"></div>
+
+  <!-- 主內容容器 -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+
+    <!-- 頂部即時大數據指標卡片 (4大核心成效) -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+      <!-- 總作答次數 -->
+      <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between relative overflow-hidden">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-slate-500">累積作答總次數</span>
+          <div class="w-8 h-8 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
+            <i data-lucide="mic" class="w-4 h-4"></i>
+          </div>
+        </div>
+        <div class="mt-2">
+          <span id="metric-total-submissions" class="text-2xl sm:text-3xl font-black text-slate-900 font-mono">0</span>
+          <span class="text-xs text-slate-400 ml-1">次</span>
+        </div>
+        <div class="mt-2 text-2xs text-slate-400 flex items-center">
+          <span class="w-1.5 h-1.5 rounded-full bg-purple-500 mr-1.5"></span>
+          <span>即時記錄每一次朗讀</span>
+        </div>
+      </div>
+
+      <!-- 參與學生人數 -->
+      <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between relative overflow-hidden">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-slate-500">參與練習學生數</span>
+          <div class="w-8 h-8 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+            <i data-lucide="users" class="w-4 h-4"></i>
+          </div>
+        </div>
+        <div class="mt-2">
+          <span id="metric-unique-students" class="text-2xl sm:text-3xl font-black text-indigo-900 font-mono">0</span>
+          <span class="text-xs text-slate-400 ml-1">位同學</span>
+        </div>
+        <div class="mt-2 text-2xs text-slate-400 flex items-center">
+          <span class="w-1.5 h-1.5 rounded-full bg-indigo-500 mr-1.5"></span>
+          <span id="metric-unique-subtext">不重複學生統計</span>
+        </div>
+      </div>
+
+      <!-- 全班平均正確率 -->
+      <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between relative overflow-hidden">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-slate-500">全班平均正確率</span>
+          <div class="w-8 h-8 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+            <i data-lucide="target" class="w-4 h-4"></i>
+          </div>
+        </div>
+        <div class="mt-2 flex items-baseline space-x-2">
+          <span id="metric-avg-accuracy" class="text-2xl sm:text-3xl font-black text-emerald-700 font-mono">--%</span>
+        </div>
+        <div class="mt-2">
+          <div class="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+            <div id="metric-accuracy-bar" class="bg-emerald-500 h-1.5 rounded-full transition-all duration-500" style="width: 0%"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 表現分佈與需關注學生 -->
+      <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs flex flex-col justify-between relative overflow-hidden">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-slate-500">學習成效分佈</span>
+          <div class="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+            <i data-lucide="award" class="w-4 h-4"></i>
+          </div>
+        </div>
+        <div class="mt-2 flex items-center justify-between">
+          <div>
+            <span class="text-2xs text-slate-400 block">優良 (≥90%)</span>
+            <span id="metric-excellent-count" class="text-lg font-bold text-emerald-600 font-mono">0</span>
+            <span class="text-2xs text-slate-400">次</span>
+          </div>
+          <div class="text-right">
+            <span class="text-2xs text-slate-400 block">待加強 (<70%)</span>
+            <span id="metric-needs-help-count" class="text-lg font-bold text-rose-600 font-mono">0</span>
+            <span class="text-2xs text-slate-400">次</span>
+          </div>
+        </div>
+        <div class="mt-2 text-2xs text-slate-500 flex items-center justify-between">
+          <button id="btn-quick-filter-needs-help" class="text-rose-600 hover:text-rose-700 underline font-semibold cursor-pointer">
+            一鍵查看待輔導名單
+          </button>
+          <span id="metric-best-score-tag" class="text-amber-700 font-medium">最高 0%</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 正確率分佈視覺條 -->
+    <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs font-bold text-slate-700 flex items-center">
+          <i data-lucide="bar-chart-2" class="w-3.5 h-3.5 mr-1.5 text-indigo-600"></i>
+          全班朗讀表現四級分佈
+        </span>
+        <span id="distribution-summary-text" class="text-2xs text-slate-400">共 0 筆作答</span>
+      </div>
+      <!-- 堆疊彩色條 -->
+      <div class="w-full bg-slate-100 rounded-xl h-3 flex overflow-hidden">
+        <div id="bar-dist-excellent" class="bg-emerald-500 h-full transition-all duration-300" style="width: 0%" title="精熟優良 (≥90%)"></div>
+        <div id="bar-dist-good" class="bg-indigo-500 h-full transition-all duration-300" style="width: 0%" title="穩定良好 (80~89%)"></div>
+        <div id="bar-dist-fair" class="bg-amber-400 h-full transition-all duration-300" style="width: 0%" title="基礎掌握 (70~79%)"></div>
+        <div id="bar-dist-poor" class="bg-rose-500 h-full transition-all duration-300" style="width: 0%" title="需再加油 (<70%)"></div>
+      </div>
+      <!-- 圖例標籤 -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2.5 text-2xs text-slate-600">
+        <div class="flex items-center space-x-1.5">
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+          <span>精熟優良 (≥90%)：<b id="legend-dist-excellent" class="font-mono text-emerald-700">0%</b></span>
+        </div>
+        <div class="flex items-center space-x-1.5">
+          <span class="w-2.5 h-2.5 rounded-full bg-indigo-500"></span>
+          <span>穩定良好 (80~89%)：<b id="legend-dist-good" class="font-mono text-indigo-700">0%</b></span>
+        </div>
+        <div class="flex items-center space-x-1.5">
+          <span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+          <span>基礎掌握 (70~79%)：<b id="legend-dist-fair" class="font-mono text-amber-700">0%</b></span>
+        </div>
+        <div class="flex items-center space-x-1.5">
+          <span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+          <span>需再加油 (<70%)：<b id="legend-dist-poor" class="font-mono text-rose-700">0%</b></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 多維度篩選與搜尋工具列 -->
+    <div class="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-3">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-2.5">
+        <div class="flex items-center space-x-2">
+          <i data-lucide="filter" class="w-4 h-4 text-purple-600"></i>
+          <h2 class="text-xs sm:text-sm font-bold text-slate-800">作答資料篩選與搜尋</h2>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button id="btn-reset-filters" type="button" class="text-2xs text-slate-500 hover:text-indigo-600 font-semibold transition">
+            重設所有篩選
+          </button>
+          <span class="text-slate-200">|</span>
+          <button id="btn-open-clear-modal" type="button" class="text-2xs text-rose-500 hover:text-rose-700 font-semibold transition" title="清空測試紀錄">
+            清理測試資料
+          </button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <!-- 班級篩選 -->
+        <div>
+          <label class="block text-2xs font-semibold text-slate-500 mb-1">班級代碼</label>
+          <select id="filter-class" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-purple-400">
+            <option value="all">所有班級 (全部)</option>
+          </select>
+        </div>
+
+        <!-- 課文題目篩選 -->
+        <div>
+          <label class="block text-2xs font-semibold text-slate-500 mb-1">課文題目</label>
+          <select id="filter-article" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-purple-400">
+            <option value="all">所有課文 (全部)</option>
+          </select>
+        </div>
+
+        <!-- 正確率等級篩選 -->
+        <div>
+          <label class="block text-2xs font-semibold text-slate-500 mb-1">表現等級</label>
+          <select id="filter-grade" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-purple-400">
+            <option value="all">所有評分等級</option>
+            <option value="excellent">⭐⭐⭐⭐⭐ 精熟優良 (≥90%)</option>
+            <option value="good">⭐⭐⭐⭐ 良好穩定 (80~89%)</option>
+            <option value="fair">⭐⭐⭐ 基礎掌握 (70~79%)</option>
+            <option value="needs_help">⚠️ 待加強輔導 (<70%)</option>
+          </select>
+        </div>
+
+        <!-- 學生姓名/座號搜尋 -->
+        <div>
+          <label class="block text-2xs font-semibold text-slate-500 mb-1">搜尋學生</label>
+          <div class="relative">
+            <i data-lucide="search" class="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-400"></i>
+            <input id="filter-search-input" type="text" placeholder="輸入姓名或座號..." class="w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-purple-400">
+          </div>
+        </div>
+
+        <!-- 排序方式 -->
+        <div>
+          <label class="block text-2xs font-semibold text-slate-500 mb-1">排序依據</label>
+          <select id="filter-sort-by" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700 focus:outline-hidden focus:ring-2 focus:ring-purple-400">
+            <option value="time_desc">最新作答優先</option>
+            <option value="time_asc">最早作答優先</option>
+            <option value="score_desc">正確率最高優先</option>
+            <option value="score_asc">正確率最低優先</option>
+            <option value="seat_asc">座號由小到大</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- 檢視模式雙標籤切換 -->
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+      <div class="flex items-center space-x-2">
+        <button id="tab-btn-feed" type="button" class="px-4 py-2 text-xs font-bold rounded-xl bg-purple-600 text-white shadow-xs transition flex items-center">
+          <i data-lucide="list-ordered" class="w-3.5 h-3.5 mr-1.5"></i>
+          作答即時流水帳 (<span id="feed-count-badge">0</span>)
+        </button>
+        <button id="tab-btn-students" type="button" class="px-4 py-2 text-xs font-semibold rounded-xl bg-white text-slate-700 hover:bg-slate-100 border border-slate-200 transition flex items-center shadow-2xs">
+          <i data-lucide="user-check" class="w-3.5 h-3.5 mr-1.5"></i>
+          學生學習成果總覽 (<span id="students-count-badge">0</span>)
+        </button>
+      </div>
+
+      <div class="text-2xs text-slate-500 flex items-center space-x-2">
+        <span>顯示篩選後結果：<b id="filtered-records-count" class="font-mono text-purple-700 font-bold">0</b> 筆</span>
+      </div>
+    </div>
+
+    <!-- 檢視模式 A：每一次作答即時流水帳 (Feed / Table) -->
+    <section id="section-view-feed" class="space-y-3">
+      <!-- 列表主體容器 -->
+      <div id="records-feed-container" class="space-y-3">
+        <!-- 初始空狀態/載入中 -->
+        <div class="bg-white rounded-2xl border border-dashed border-slate-200 p-12 text-center text-slate-400">
+          <i data-lucide="loader" class="w-6 h-6 mx-auto mb-2 animate-spin text-purple-500"></i>
+          <p class="text-xs">正在從雲端載入學生作答紀錄...</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 檢視模式 B：學生個別學習成效彙整 (以人為單位) -->
+    <section id="section-view-students" class="hidden space-y-4">
+      <div class="bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs text-xs text-slate-500 flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <i data-lucide="info" class="w-4 h-4 text-indigo-500"></i>
+          <span>依班級與座號整合每位同學的「練習次數、最佳成績、最新狀態與平均正確率」。點擊卡片可展開該同學的所有歷史練習紀錄。</span>
+        </div>
+      </div>
+      <!-- 學生卡片網格 -->
+      <div id="students-grid-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+        <!-- 動態渲染學生卡片 -->
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 頁腳 -->
+  <footer class="bg-white border-t border-slate-200 py-6 text-center text-2xs text-slate-400 mt-12">
+    <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
+      <div class="flex items-center space-x-2">
+        <span class="font-bold text-slate-700">智慧朗讀教練</span>
+        <span>•</span>
+        <span>教師專用後台管理系統</span>
+      </div>
+      <div>
+        <span>支援 Google Cloud Firestore 雲端即時連線 & 本機離線快取</span>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ======================================================== -->
+  <!-- MODALS (彈出視窗) -->
+  <!-- ======================================================== -->
+
+  <!-- 1. 深度診斷 Modal (查看原文 vs 學生發音辨識文字) -->
+  <div id="diagnostic-modal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-7 shadow-2xl border border-slate-100 flex flex-col max-h-[92vh] overflow-hidden">
+      <!-- 標題列 -->
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
+            <i data-lucide="stethoscope" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-slate-900" id="diag-student-title">作答詳細診斷報告</h3>
+            <p class="text-xs text-slate-400" id="diag-student-sub">學生：-- | 課文：--</p>
+          </div>
+        </div>
+        <button id="btn-close-diagnostic-modal" type="button" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- 滾動內容區 -->
+      <div class="flex-1 overflow-y-auto space-y-4 pr-1">
+        <!-- 4大核心指標列 -->
+        <div class="grid grid-cols-4 gap-2">
+          <div class="p-3 bg-purple-50 rounded-2xl text-center border border-purple-100">
+            <div class="text-2xs text-purple-700 font-semibold">正確率</div>
+            <div id="diag-score-rate" class="text-2xl font-black text-purple-900 font-mono mt-0.5">--%</div>
+          </div>
+          <div class="p-3 bg-emerald-50 rounded-2xl text-center border border-emerald-100">
+            <div class="text-2xs text-emerald-700 font-semibold">唸對字數</div>
+            <div id="diag-score-correct" class="text-2xl font-black text-emerald-900 font-mono mt-0.5">0</div>
+          </div>
+          <div class="p-3 bg-rose-50 rounded-2xl text-center border border-rose-100">
+            <div class="text-2xs text-rose-700 font-semibold">漏讀/錯誤</div>
+            <div id="diag-score-missed" class="text-2xl font-black text-rose-900 font-mono mt-0.5">0</div>
+          </div>
+          <div class="p-3 bg-amber-50 rounded-2xl text-center border border-amber-100">
+            <div class="text-2xs text-amber-700 font-semibold">贅字/多讀</div>
+            <div id="diag-score-extra" class="text-2xl font-black text-amber-900 font-mono mt-0.5">0</div>
+          </div>
+        </div>
+
+        <!-- 朗讀輔助統計資訊 (星級、字數、耗時) -->
+        <div class="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-50 text-xs text-slate-600 border border-slate-100">
+          <div class="flex items-center space-x-1">
+            <span class="text-slate-400">評級：</span>
+            <span id="diag-score-stars" class="text-amber-500 font-bold">⭐⭐⭐⭐⭐</span>
+          </div>
+          <div>
+            <span class="text-slate-400">課文字數：</span>
+            <span id="diag-total-chars" class="font-mono font-bold text-slate-800">0</span>
+            <span class="text-slate-400">字</span>
+          </div>
+          <div>
+            <span class="text-slate-400">朗讀耗時：</span>
+            <span id="diag-duration" class="font-mono font-bold text-slate-800">0</span>
+            <span class="text-slate-400">秒</span>
+          </div>
+          <div>
+            <span class="text-slate-400">時間：</span>
+            <span id="diag-timestamp" class="text-2xs text-slate-500">--</span>
+          </div>
+        </div>
+
+        <!-- 課文標準原文 -->
+        <div>
+          <div class="text-xs font-bold text-slate-700 mb-1 flex items-center">
+            <i data-lucide="book-open" class="w-3.5 h-3.5 mr-1 text-indigo-500"></i>
+            標準課文原文
+          </div>
+          <div id="diag-target-text" class="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs sm:text-sm text-slate-800 leading-relaxed max-h-32 overflow-y-auto whitespace-pre-wrap">
+            無課文內容紀錄
+          </div>
+        </div>
+
+        <!-- 學生實際錄音辨識出的語音文字 -->
+        <div>
+          <div class="text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+            <span class="flex items-center">
+              <i data-lucide="mic" class="w-3.5 h-3.5 mr-1 text-purple-600"></i>
+              學生錄音語音辨識內容 (STT 輸出)
+            </span>
+            <span class="text-2xs text-slate-400 font-normal">依瀏覽器即時語音辨識紀錄</span>
+          </div>
+          <div id="diag-spoken-text" class="p-3 bg-purple-50/60 border border-purple-200 rounded-xl text-xs sm:text-sm text-purple-950 font-sans leading-relaxed max-h-36 overflow-y-auto whitespace-pre-wrap">
+            （本次練習未保存錄音文字或學生未發出聲音）
+          </div>
+        </div>
+
+        <!-- 智慧教練診斷分析建議 -->
+        <div>
+          <div class="text-xs font-bold text-slate-700 mb-1 flex items-center">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5 mr-1 text-amber-500"></i>
+            智慧教練評語與改進指南
+          </div>
+          <div id="diag-feedback-text" class="p-3 bg-amber-50/70 border border-amber-200 rounded-xl text-xs text-amber-900 leading-relaxed">
+            表現優異，發音清晰且節奏流暢！
+          </div>
+        </div>
+      </div>
+
+      <!-- 底部關閉按鈕 -->
+      <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-end">
+        <button id="btn-close-diagnostic-modal-bottom" type="button" class="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition">
+          關閉
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. 個別學生歷程歷史 Modal -->
+  <div id="student-history-modal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl max-w-2xl w-full p-6 sm:p-7 shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden">
+      <!-- 標題列 -->
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+        <div class="flex items-center space-x-3">
+          <div class="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+            <i data-lucide="user" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-slate-900" id="hist-modal-title">學生個人朗讀成長曲線</h3>
+            <p class="text-xs text-slate-400" id="hist-modal-sub">歷次作答紀錄一覽</p>
+          </div>
+        </div>
+        <button id="btn-close-student-history-modal" type="button" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- 統計摘要欄 -->
+      <div class="grid grid-cols-3 gap-2 mb-4">
+        <div class="p-3 bg-slate-50 border border-slate-100 rounded-xl text-center">
+          <div class="text-2xs text-slate-500 font-semibold">練習次數</div>
+          <div id="hist-modal-count" class="text-xl font-black text-slate-800 font-mono mt-0.5">0</div>
+        </div>
+        <div class="p-3 bg-emerald-50 border border-emerald-100 rounded-xl text-center">
+          <div class="text-2xs text-emerald-700 font-semibold">最佳成績</div>
+          <div id="hist-modal-best" class="text-xl font-black text-emerald-900 font-mono mt-0.5">--%</div>
+        </div>
+        <div class="p-3 bg-purple-50 border border-purple-100 rounded-xl text-center">
+          <div class="text-2xs text-purple-700 font-semibold">平均正確率</div>
+          <div id="hist-modal-avg" class="text-xl font-black text-purple-900 font-mono mt-0.5">--%</div>
+        </div>
+      </div>
+
+      <!-- 歷次清單滾動區 -->
+      <div id="student-history-list" class="flex-1 overflow-y-auto space-y-2.5 pr-1">
+        <!-- 動態渲染歷史紀錄 -->
+      </div>
+
+      <!-- 底部按鈕 -->
+      <div class="mt-4 pt-3 border-t border-slate-100 flex items-center justify-end">
+        <button id="btn-close-student-history-modal-bottom" type="button" class="px-5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition">
+          關閉
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. 清理測試資料 Modal -->
+  <div id="clear-data-modal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 flex flex-col">
+      <div class="flex items-center space-x-3 mb-3 text-rose-600">
+        <div class="w-10 h-10 rounded-xl bg-rose-50 flex items-center justify-center">
+          <i data-lucide="alert-triangle" class="w-5 h-5"></i>
+        </div>
+        <div>
+          <h3 class="text-base font-bold text-slate-900">清理作答測試紀錄</h3>
+          <p class="text-xs text-slate-400">此動作將清除已儲存的作答資料</p>
+        </div>
+      </div>
+      <p class="text-xs text-slate-600 mb-4 leading-relaxed">
+        教師在測試系統或新學期開學時，可清理舊有作答資料。請選擇要清理的範圍：
+      </p>
+
+      <div class="space-y-2.5 mb-5">
+        <label class="flex items-center p-3 rounded-xl border border-slate-200 bg-slate-50 cursor-pointer hover:border-purple-300">
+          <input type="radio" name="clear-scope" value="current_class" checked class="text-purple-600 focus:ring-purple-500">
+          <span class="ml-2.5 text-xs font-semibold text-slate-700">僅清理目前篩選的班級紀錄</span>
+        </label>
+        <label class="flex items-center p-3 rounded-xl border border-slate-200 bg-slate-50 cursor-pointer hover:border-purple-300">
+          <input type="radio" name="clear-scope" value="all" class="text-purple-600 focus:ring-purple-500">
+          <span class="ml-2.5 text-xs font-semibold text-rose-700">清空所有班級的全部作答紀錄</span>
+        </label>
+      </div>
+
+      <div class="flex items-center justify-end space-x-2">
+        <button id="btn-cancel-clear" type="button" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl text-xs font-semibold transition">
+          取消
+        </button>
+        <button id="btn-confirm-clear" type="button" class="px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-bold transition">
+          確認清理
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. Firebase 設定 Modal -->
+  <div id="firebase-modal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl max-w-lg w-full p-6 sm:p-7 shadow-2xl border border-slate-100 flex flex-col max-h-[90vh] overflow-hidden">
+      <!-- 標題區 -->
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-9 h-9 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
+            <i data-lucide="database" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-slate-800">Firebase 雲端連線設定</h3>
+            <p class="text-xs text-slate-400">連接 Google Cloud Firestore 進行跨裝置即時收集</p>
+          </div>
+        </div>
+        <button id="btn-close-firebase-modal" type="button" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <!-- 連線狀態指示燈 -->
+      <div id="fb-status-banner" class="mb-4 p-3 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 text-xs flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span id="fb-status-text" class="font-bold">雲端連線正常</span>
+        </div>
+      </div>
+
+      <!-- 說明指引 -->
+      <p class="text-2xs text-slate-500 mb-3 leading-relaxed">
+        系統已預載官方示範專案，老師亦可在下方更換為自訂的 Firebase 專案 SDK 配置：
+      </p>
+
+      <div class="space-y-3 flex-1 overflow-y-auto pr-1">
+        <div>
+          <label class="block text-2xs font-semibold text-slate-600 mb-1">apiKey</label>
+          <input id="fb-input-apikey" type="text" class="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-700">
+        </div>
+        <div>
+          <label class="block text-2xs font-semibold text-slate-600 mb-1">projectId</label>
+          <input id="fb-input-projectid" type="text" class="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-700">
+        </div>
+        <div>
+          <label class="block text-2xs font-semibold text-slate-600 mb-1">authDomain</label>
+          <input id="fb-input-authdomain" type="text" class="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-700">
+        </div>
+      </div>
+
+      <div class="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between">
+        <button id="btn-reset-firebase-config" type="button" class="text-2xs text-slate-400 hover:text-rose-600 underline">
+          恢復系統預設配置
+        </button>
+        <div class="flex items-center space-x-2">
+          <button id="btn-save-firebase-config" type="button" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-xs transition">
+            儲存並重新連線
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 教師端核心邏輯腳本 -->
+  <script src="teacher.js"></script>
+</body>
+</html>

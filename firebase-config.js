@@ -215,6 +215,8 @@
       extraCount: scoreData.extraCount ?? 0,
       totalChars: scoreData.totalChars ?? 0,
       durationSeconds: scoreData.durationSeconds ?? 0,
+      spokenText: scoreData.spokenText || '',
+      targetText: scoreData.targetText || '',
       recordedAt: new Date().toISOString(),
       timestamp: Date.now()
     };
@@ -272,12 +274,11 @@
       try {
         const snapshot = await firestoreDb.collection('reading_records')
           .where('classId', '==', classId.trim())
-          .orderBy('timestamp', 'desc')
-          .limit(500)
           .get();
 
         const results = [];
-        snapshot.forEach(doc => results.push(doc.data()));
+        snapshot.forEach(doc => results.push({ id: doc.id, ...doc.data() }));
+        results.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
         if (results.length > 0) return results;
       } catch (err) {
         console.warn('從 Firestore 讀取全班紀錄失敗，改讀本機：', err);
@@ -288,6 +289,147 @@
     return local.filter(r => r.classId === classId.trim());
   }
 
+  // 取得所有朗讀紀錄（供教師看板檢視與大數據分析）
+  async function getAllRecords(options = {}) {
+    const classId = options.classId && options.classId !== 'all' ? options.classId.trim() : null;
+
+    if (isFirebaseReady && firestoreDb) {
+      try {
+        let query = firestoreDb.collection('reading_records');
+        if (classId) {
+          query = query.where('classId', '==', classId);
+        }
+        const snapshot = await query.get();
+        const results = [];
+        snapshot.forEach(doc => results.push({ id: doc.id, ...doc.data() }));
+        results.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+        if (results.length > 0) return results;
+      } catch (err) {
+        console.warn('從 Firestore 載入所有紀錄失敗，改讀本機快取：', err);
+      }
+    }
+
+    const local = getLocalRecords();
+    if (classId) {
+      return local.filter(r => r.classId === classId);
+    }
+    return local;
+  }
+
+  // 即時監聽所有學生作答紀錄 (Firestore onSnapshot + 本機事件回呼)
+  function subscribeAllRecords(callback, options = {}) {
+    const classId = options.classId && options.classId !== 'all' ? options.classId.trim() : null;
+
+    if (!isFirebaseReady || !firestoreDb) {
+      const initial = getLocalRecords().filter(r => !classId || r.classId === classId);
+      if (typeof callback === 'function') callback(initial, { isFirst: true, source: 'local' });
+
+      const onStorage = (e) => {
+        if (e.key === STORAGE_KEY_LOCAL_SCORES) {
+          const updated = getLocalRecords().filter(r => !classId || r.classId === classId);
+          if (typeof callback === 'function') callback(updated, { isFirst: false, source: 'local' });
+        }
+      };
+      window.addEventListener('storage', onStorage);
+      return () => window.removeEventListener('storage', onStorage);
+    }
+
+    try {
+      let query = firestoreDb.collection('reading_records');
+      if (classId) {
+        query = query.where('classId', '==', classId);
+      }
+
+      let isFirst = true;
+      const unsubscribe = query.onSnapshot((snapshot) => {
+        const results = [];
+        snapshot.forEach(doc => {
+          results.push({ id: doc.id, ...doc.data() });
+        });
+        results.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+        try {
+          if (results.length > 0) {
+            localStorage.setItem(STORAGE_KEY_LOCAL_SCORES, JSON.stringify(results.slice(0, 300)));
+          }
+        } catch (e) {}
+
+        if (typeof callback === 'function') {
+          callback(results, { isFirst, docChanges: snapshot.docChanges ? snapshot.docChanges() : [], source: 'cloud' });
+        }
+        isFirst = false;
+      }, (err) => {
+        console.warn('Firestore 監聽失敗，改讀本機：', err);
+        const fallback = getLocalRecords().filter(r => !classId || r.classId === classId);
+        if (typeof callback === 'function') callback(fallback, { isFirst: false, source: 'local_fallback', error: err.message });
+      });
+
+      return unsubscribe;
+    } catch (err) {
+      console.warn('建立即時監聽異常：', err);
+      const fallback = getLocalRecords().filter(r => !classId || r.classId === classId);
+      if (typeof callback === 'function') callback(fallback, { isFirst: true, source: 'local_fallback' });
+      return null;
+    }
+  }
+
+  // 刪除特定單筆作答紀錄
+  async function deleteReadingRecord(recordId) {
+    if (!recordId) return false;
+
+    // 1. 本機快取刪除
+    const local = getLocalRecords();
+    const updated = local.filter(r => r.id !== recordId);
+    localStorage.setItem(STORAGE_KEY_LOCAL_SCORES, JSON.stringify(updated));
+
+    // 2. 雲端 Firestore 刪除
+    if (isFirebaseReady && firestoreDb) {
+      try {
+        await firestoreDb.collection('reading_records').doc(recordId).delete();
+        console.log('🗑️ 雲端紀錄已刪除：', recordId);
+        return true;
+      } catch (err) {
+        console.warn('雲端刪除失敗：', err);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // 清除特定班級或全部紀錄 (方便老師測試完清理資料)
+  async function clearAllRecords(targetClassId = null) {
+    const local = getLocalRecords();
+    const cleanClass = targetClassId && targetClassId !== 'all' ? targetClassId.trim() : null;
+
+    if (cleanClass) {
+      const remaining = local.filter(r => r.classId !== cleanClass);
+      localStorage.setItem(STORAGE_KEY_LOCAL_SCORES, JSON.stringify(remaining));
+    } else {
+      localStorage.removeItem(STORAGE_KEY_LOCAL_SCORES);
+    }
+
+    if (isFirebaseReady && firestoreDb) {
+      try {
+        let query = firestoreDb.collection('reading_records');
+        if (cleanClass) {
+          query = query.where('classId', '==', cleanClass);
+        }
+        const snapshot = await query.get();
+        const batch = firestoreDb.batch();
+        snapshot.forEach(doc => {
+          batch.delete(doc.ref);
+        });
+        await batch.commit();
+        console.log('🗑️ 雲端資料批次清理完成');
+        return true;
+      } catch (err) {
+        console.warn('雲端清理失敗：', err);
+        return false;
+      }
+    }
+    return true;
+  }
+
   // 匯出 CSV 檔案
   function exportRecordsToCsv(records, filename = '朗讀成績歷程.csv') {
     if (!records || records.length === 0) {
@@ -295,7 +437,7 @@
       return;
     }
 
-    const headers = ['紀錄編號', '班級', '座號', '姓名', '文章標題', '總字數', '正確率(%)', '星等', '唸對字數', '漏讀字數', '多讀字數', '耗時(秒)', '朗讀時間'];
+    const headers = ['紀錄編號', '班級', '座號', '姓名', '文章標題', '總字數', '正確率(%)', '星等', '唸對字數', '漏讀字數', '多讀字數', '耗時(秒)', '朗讀時間', '學生錄音朗讀內容'];
     const rows = records.map(r => [
       `"${r.id || ''}"`,
       `"${r.classId || ''}"`,
@@ -309,7 +451,8 @@
       r.missedCount || 0,
       r.extraCount || 0,
       r.durationSeconds || 0,
-      `"${new Date(r.recordedAt || r.timestamp).toLocaleString('zh-TW')}"`
+      `"${new Date(r.recordedAt || r.timestamp).toLocaleString('zh-TW')}"`,
+      `"${(r.spokenText || '').replace(/"/g, '""')}"`
     ]);
 
     // 加入 UTF-8 BOM 避免 Excel 開啟亂碼
@@ -519,6 +662,10 @@
     recordReadingScore,
     getStudentRecords,
     getClassRecords,
+    getAllRecords,
+    subscribeAllRecords,
+    deleteReadingRecord,
+    clearAllRecords,
     getLocalRecords,
     exportRecordsToCsv,
     publishClassMaterials,

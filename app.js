@@ -1846,7 +1846,9 @@ document.addEventListener('DOMContentLoaded', () => {
       missedCount,
       extraCount,
       totalChars: totalTarget,
-      durationSeconds: recordSeconds || 0
+      durationSeconds: recordSeconds || 0,
+      spokenText: rawSpoken || '',
+      targetText: rawTarget || ''
     };
 
     if (typeof handleAutoRecordScore === 'function') {
