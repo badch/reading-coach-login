@@ -21,6 +21,36 @@
   const btnOpenFirebaseModal = document.getElementById('btn-open-firebase-modal');
   const liveToastContainer = document.getElementById('live-toast-container');
 
+  // 驗證與安全鎖定 DOM
+  const teacherAuthOverlay = document.getElementById('teacher-auth-overlay');
+  const formTeacherLogin = document.getElementById('form-teacher-login');
+  const inputTeacherPwd = document.getElementById('input-teacher-pwd');
+  const btnTogglePwdVisibility = document.getElementById('btn-toggle-pwd-visibility');
+  const iconPwdEye = document.getElementById('icon-pwd-eye');
+  const pwdErrorMsg = document.getElementById('pwd-error-msg');
+  const pwdErrorText = document.getElementById('pwd-error-text');
+  const cbRememberTeacher = document.getElementById('cb-remember-teacher');
+  const btnSubmitTeacherPwd = document.getElementById('btn-submit-teacher-pwd');
+  const btnTeacherLock = document.getElementById('btn-teacher-lock');
+  const btnLoginWithGoogle = document.getElementById('btn-login-with-google');
+
+  // 安全設定 Modal DOM
+  const securityModal = document.getElementById('security-modal');
+  const btnOpenSecurityModal = document.getElementById('btn-open-security-modal');
+  const btnCloseSecurityModal = document.getElementById('btn-close-security-modal');
+  const inputNewTeacherPwd = document.getElementById('input-new-teacher-pwd');
+  const inputConfirmTeacherPwd = document.getElementById('input-confirm-teacher-pwd');
+  const cbHideTeacherBtn = document.getElementById('cb-hide-teacher-btn');
+  const btnResetTeacherPwdDefault = document.getElementById('btn-reset-teacher-pwd-default');
+  const btnSaveSecuritySettings = document.getElementById('btn-save-security-settings');
+
+  // 安全金鑰常數
+  const STORAGE_KEY_TEACHER_PWD = 'reading_coach_teacher_pwd';
+  const STORAGE_KEY_REMEMBER_AUTH = 'reading_coach_teacher_auth_until';
+  const STORAGE_KEY_HIDE_BTN = 'reading_coach_hide_teacher_btn';
+  const SESSION_KEY_AUTH = 'reading_coach_teacher_session_auth';
+  const DEFAULT_TEACHER_PWD = '8888';
+
   // 指標看板
   const metricTotalSubmissions = document.getElementById('metric-total-submissions');
   const metricUniqueStudents = document.getElementById('metric-unique-students');
@@ -108,6 +138,142 @@
   const btnResetFirebaseConfig = document.getElementById('btn-reset-firebase-config');
 
   // ========================================================
+  // 0. 教師安全身分驗證與鎖定控制
+  // ========================================================
+  function getStoredPassword() {
+    return localStorage.getItem(STORAGE_KEY_TEACHER_PWD) || DEFAULT_TEACHER_PWD;
+  }
+
+  function isTeacherAuthenticated() {
+    if (sessionStorage.getItem(SESSION_KEY_AUTH) === 'true') return true;
+    const rememberUntil = localStorage.getItem(STORAGE_KEY_REMEMBER_AUTH);
+    if (rememberUntil && Number(rememberUntil) > Date.now()) return true;
+    return false;
+  }
+
+  function setAuthenticated(remember7Days = false) {
+    sessionStorage.setItem(SESSION_KEY_AUTH, 'true');
+    if (remember7Days) {
+      const sevenDays = Date.now() + 7 * 24 * 60 * 60 * 1000;
+      localStorage.setItem(STORAGE_KEY_REMEMBER_AUTH, sevenDays.toString());
+    } else {
+      localStorage.removeItem(STORAGE_KEY_REMEMBER_AUTH);
+    }
+  }
+
+  function clearAuthentication() {
+    sessionStorage.removeItem(SESSION_KEY_AUTH);
+    localStorage.removeItem(STORAGE_KEY_REMEMBER_AUTH);
+  }
+
+  function unlockDashboard() {
+    if (teacherAuthOverlay) {
+      teacherAuthOverlay.classList.add('transition-opacity', 'duration-300', 'opacity-0', 'pointer-events-none');
+      setTimeout(() => teacherAuthOverlay.classList.add('hidden'), 300);
+    }
+    updateCloudConnectionBadge();
+    startLiveSubscription();
+  }
+
+  function lockDashboard() {
+    clearAuthentication();
+    if (unsubscribeLive && typeof unsubscribeLive === 'function') {
+      try { unsubscribeLive(); } catch (e) {}
+      unsubscribeLive = null;
+    }
+    rawRecords = [];
+    filteredRecords = [];
+    if (recordsFeedContainer) recordsFeedContainer.innerHTML = '';
+    if (studentsGridContainer) studentsGridContainer.innerHTML = '';
+    renderAnalyticsCards([]);
+
+    if (teacherAuthOverlay) {
+      teacherAuthOverlay.classList.remove('hidden', 'opacity-0', 'pointer-events-none');
+      if (inputTeacherPwd) {
+        inputTeacherPwd.value = '';
+        setTimeout(() => inputTeacherPwd.focus(), 100);
+      }
+      if (pwdErrorMsg) pwdErrorMsg.classList.add('hidden');
+    }
+  }
+
+  function handleTeacherLogin() {
+    const entered = (inputTeacherPwd ? inputTeacherPwd.value : '').trim();
+    const correctPwd = getStoredPassword();
+
+    if (!entered) {
+      if (pwdErrorMsg) {
+        pwdErrorText.textContent = '請輸入教師通關密碼！';
+        pwdErrorMsg.classList.remove('hidden');
+      }
+      return;
+    }
+
+    if (entered === correctPwd) {
+      const remember = cbRememberTeacher ? cbRememberTeacher.checked : false;
+      setAuthenticated(remember);
+      if (pwdErrorMsg) pwdErrorMsg.classList.add('hidden');
+      unlockDashboard();
+    } else {
+      if (pwdErrorMsg) {
+        pwdErrorText.textContent = '通關密碼錯誤，請重新輸入！(預設密碼為 8888)';
+        pwdErrorMsg.classList.remove('hidden');
+      }
+      if (inputTeacherPwd) {
+        inputTeacherPwd.classList.add('border-rose-500');
+        setTimeout(() => inputTeacherPwd.classList.remove('border-rose-500'), 800);
+        inputTeacherPwd.select();
+      }
+    }
+  }
+
+  function openSecurityModal() {
+    if (inputNewTeacherPwd) inputNewTeacherPwd.value = '';
+    if (inputConfirmTeacherPwd) inputConfirmTeacherPwd.value = '';
+    if (cbHideTeacherBtn) {
+      cbHideTeacherBtn.checked = localStorage.getItem(STORAGE_KEY_HIDE_BTN) === 'true';
+    }
+    if (securityModal) securityModal.classList.remove('hidden');
+  }
+
+  function closeSecurityModal() {
+    if (securityModal) securityModal.classList.add('hidden');
+  }
+
+  function handleSaveSecuritySettings() {
+    const newPwd = inputNewTeacherPwd ? inputNewTeacherPwd.value.trim() : '';
+    const confirmPwd = inputConfirmTeacherPwd ? inputConfirmTeacherPwd.value.trim() : '';
+
+    if (newPwd) {
+      if (newPwd.length < 4) {
+        alert('新密碼長度建議至少為 4 碼！');
+        return;
+      }
+      if (newPwd !== confirmPwd) {
+        alert('兩次輸入的新密碼不一致，請再次確認！');
+        return;
+      }
+      localStorage.setItem(STORAGE_KEY_TEACHER_PWD, newPwd);
+    }
+
+    if (cbHideTeacherBtn) {
+      localStorage.setItem(STORAGE_KEY_HIDE_BTN, cbHideTeacherBtn.checked ? 'true' : 'false');
+    }
+
+    closeSecurityModal();
+    alert('✅ 教師安全與入口設定已成功儲存！');
+  }
+
+  function handleResetTeacherPwdDefault() {
+    if (confirm('確定要將教師通關密碼恢復為預設值 (8888) 嗎？')) {
+      localStorage.removeItem(STORAGE_KEY_TEACHER_PWD);
+      if (inputNewTeacherPwd) inputNewTeacherPwd.value = '';
+      if (inputConfirmTeacherPwd) inputConfirmTeacherPwd.value = '';
+      alert('已恢復預設通關密碼：8888');
+    }
+  }
+
+  // ========================================================
   // 1. 初始化與即時資料訂閱
   // ========================================================
   function initDashboard() {
@@ -116,9 +282,13 @@
       return;
     }
 
-    updateCloudConnectionBadge();
     setupEventListeners();
-    startLiveSubscription();
+
+    if (isTeacherAuthenticated()) {
+      unlockDashboard();
+    } else {
+      lockDashboard();
+    }
   }
 
   // 啟動即時訂閱監聽
@@ -948,6 +1118,62 @@
     btnCloseFirebaseModal.addEventListener('click', closeFirebaseModal);
     btnSaveFirebaseConfig.addEventListener('click', handleSaveFirebaseConfig);
     btnResetFirebaseConfig.addEventListener('click', handleResetFirebaseConfig);
+
+    // 教師驗證表單
+    if (formTeacherLogin) {
+      formTeacherLogin.addEventListener('submit', (e) => {
+        e.preventDefault();
+        handleTeacherLogin();
+      });
+    }
+    if (btnSubmitTeacherPwd) {
+      btnSubmitTeacherPwd.addEventListener('click', handleTeacherLogin);
+    }
+    if (inputTeacherPwd) {
+      inputTeacherPwd.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') handleTeacherLogin();
+      });
+    }
+
+    // 密碼顯示/隱藏切換
+    if (btnTogglePwdVisibility && inputTeacherPwd) {
+      btnTogglePwdVisibility.addEventListener('click', () => {
+        const isPwd = inputTeacherPwd.type === 'password';
+        inputTeacherPwd.type = isPwd ? 'text' : 'password';
+        if (iconPwdEye) {
+          iconPwdEye.setAttribute('data-lucide', isPwd ? 'eye-off' : 'eye');
+          if (window.lucide) window.lucide.createIcons();
+        }
+      });
+    }
+
+    // Google 登入解鎖
+    if (btnLoginWithGoogle) {
+      btnLoginWithGoogle.addEventListener('click', async () => {
+        try {
+          await window.ReadingCoachFirebase.loginWithGoogle();
+          setAuthenticated(true);
+          unlockDashboard();
+        } catch (e) {
+          alert('Google 驗證提示：' + (e.message || '請確認 Firebase 配置'));
+        }
+      });
+    }
+
+    // 鎖定看板
+    if (btnTeacherLock) {
+      btnTeacherLock.addEventListener('click', () => {
+        if (confirm('確定要立即鎖定教師看板嗎？（解鎖需重新輸入密碼）')) {
+          lockDashboard();
+        }
+      });
+    }
+
+    // 安全設定 Modal
+    if (btnOpenSecurityModal) btnOpenSecurityModal.addEventListener('click', openSecurityModal);
+    if (btnCloseSecurityModal) btnCloseSecurityModal.addEventListener('click', closeSecurityModal);
+    if (btnSaveSecuritySettings) btnSaveSecuritySettings.addEventListener('click', handleSaveSecuritySettings);
+    if (btnResetTeacherPwdDefault) btnResetTeacherPwdDefault.addEventListener('click', handleResetTeacherPwdDefault);
   }
 
   // ========================================================

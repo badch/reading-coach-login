@@ -2395,6 +2395,117 @@ document.addEventListener('DOMContentLoaded', () => {
   // 啟用雲端課文庫即時監聽與自動載入 (進入網站自動讀取 Firestore 課文)
   initCloudSamplesAutoSync();
 
+  // ==========================================
+  // --- 教師管理看板安全暗門與入口保護 ---
+  // ==========================================
+  const btnTeacherPortal = document.getElementById('btn-teacher-portal');
+  const appHeaderLogo = document.getElementById('app-header-logo');
+  const teacherAccessModal = document.getElementById('teacher-access-modal');
+  const inputModalTeacherPwd = document.getElementById('input-modal-teacher-pwd');
+  const modalPwdErrorMsg = document.getElementById('modal-pwd-error-msg');
+  const btnCancelTeacherAccess = document.getElementById('btn-cancel-teacher-access');
+  const btnConfirmTeacherAccess = document.getElementById('btn-confirm-teacher-access');
+
+  const STORAGE_KEY_TEACHER_PWD = 'reading_coach_teacher_pwd';
+  const STORAGE_KEY_HIDE_BTN = 'reading_coach_hide_teacher_btn';
+  const STORAGE_KEY_REMEMBER_AUTH = 'reading_coach_teacher_auth_until';
+  const SESSION_KEY_AUTH = 'reading_coach_teacher_session_auth';
+  const DEFAULT_TEACHER_PWD = '8888';
+
+  function isTeacherSessionValid() {
+    if (sessionStorage.getItem(SESSION_KEY_AUTH) === 'true') return true;
+    const rememberUntil = localStorage.getItem(STORAGE_KEY_REMEMBER_AUTH);
+    if (rememberUntil && Number(rememberUntil) > Date.now()) return true;
+    return false;
+  }
+
+  // 檢查是否應隱藏學生端教師按鈕
+  function applyTeacherButtonVisibility() {
+    if (!btnTeacherPortal) return;
+    const isHidden = localStorage.getItem(STORAGE_KEY_HIDE_BTN) === 'true';
+    if (isHidden) {
+      btnTeacherPortal.classList.add('hidden');
+    } else {
+      btnTeacherPortal.classList.remove('hidden');
+    }
+  }
+
+  applyTeacherButtonVisibility();
+
+  // 1. 連點 3 次 Logo 喚醒教師入口 (暗門手勢)
+  let logoClickCount = 0;
+  let logoClickTimer = null;
+  if (appHeaderLogo) {
+    appHeaderLogo.addEventListener('click', () => {
+      logoClickCount++;
+      clearTimeout(logoClickTimer);
+      logoClickTimer = setTimeout(() => {
+        logoClickCount = 0;
+      }, 1500);
+
+      if (logoClickCount >= 3) {
+        logoClickCount = 0;
+        // 喚醒並顯示教師按鈕
+        if (btnTeacherPortal) {
+          btnTeacherPortal.classList.remove('hidden');
+          btnTeacherPortal.classList.add('animate-bounce');
+          setTimeout(() => btnTeacherPortal.classList.remove('animate-bounce'), 1000);
+        }
+        if (window.confetti) {
+          window.confetti({ particleCount: 30, spread: 45, origin: { x: 0.1, y: 0.1 } });
+        }
+        openTeacherAccessModal();
+      }
+    });
+  }
+
+  // 2. 點擊教師看板按鈕
+  function openTeacherAccessModal() {
+    if (isTeacherSessionValid()) {
+      window.location.href = 'teacher.html';
+      return;
+    }
+    if (teacherAccessModal) {
+      teacherAccessModal.classList.remove('hidden');
+      if (inputModalTeacherPwd) {
+        inputModalTeacherPwd.value = '';
+        setTimeout(() => inputModalTeacherPwd.focus(), 100);
+      }
+      if (modalPwdErrorMsg) modalPwdErrorMsg.classList.add('hidden');
+    }
+  }
+
+  function closeTeacherAccessModal() {
+    if (teacherAccessModal) teacherAccessModal.classList.add('hidden');
+  }
+
+  function handleVerifyTeacherAccess() {
+    const entered = (inputModalTeacherPwd ? inputModalTeacherPwd.value : '').trim();
+    const correctPwd = localStorage.getItem(STORAGE_KEY_TEACHER_PWD) || DEFAULT_TEACHER_PWD;
+
+    if (entered === correctPwd) {
+      sessionStorage.setItem(SESSION_KEY_AUTH, 'true');
+      closeTeacherAccessModal();
+      window.location.href = 'teacher.html';
+    } else {
+      if (modalPwdErrorMsg) modalPwdErrorMsg.classList.remove('hidden');
+      if (inputModalTeacherPwd) {
+        inputModalTeacherPwd.classList.add('border-rose-500');
+        setTimeout(() => inputModalTeacherPwd.classList.remove('border-rose-500'), 600);
+        inputModalTeacherPwd.select();
+      }
+    }
+  }
+
+  if (btnTeacherPortal) btnTeacherPortal.addEventListener('click', openTeacherAccessModal);
+  if (btnCancelTeacherAccess) btnCancelTeacherAccess.addEventListener('click', closeTeacherAccessModal);
+  if (btnConfirmTeacherAccess) btnConfirmTeacherAccess.addEventListener('click', handleVerifyTeacherAccess);
+  if (inputModalTeacherPwd) {
+    inputModalTeacherPwd.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') handleVerifyTeacherAccess();
+    });
+  }
+
   // 預設填入一首優美的示範詩詞，讓初次打開的使用者有完整體驗
   articleText.value = DEFAULT_SAMPLES[0].content;
   currentArticleTitle = DEFAULT_SAMPLES[0].title;

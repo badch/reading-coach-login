@@ -24,6 +24,60 @@
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col font-sans antialiased selection:bg-indigo-100 selection:text-indigo-900">
 
+  <!-- 教師身分驗證鎖定覆蓋層 (未解鎖時遮蔽整個畫面與資料) -->
+  <div id="teacher-auth-overlay" class="fixed inset-0 z-50 bg-slate-900/85 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl border border-slate-100 flex flex-col items-center text-center">
+      <!-- 鎖定圖示 -->
+      <div class="w-16 h-16 rounded-2xl bg-gradient-to-tr from-purple-500 to-indigo-600 text-white flex items-center justify-center shadow-lg shadow-purple-200 mb-4">
+        <i data-lucide="lock" class="w-8 h-8"></i>
+      </div>
+      <h2 class="text-xl font-bold text-slate-900">教師身分驗證</h2>
+      <p class="text-xs text-slate-500 mt-1 mb-6 leading-relaxed">
+        本頁面包含全班學生個人作答紀錄與成績檔案。<br>請輸入教師通關密碼以解除鎖定。
+      </p>
+
+      <!-- 密碼輸入表單 -->
+      <form id="form-teacher-login" class="w-full space-y-4" onsubmit="return false;">
+        <div class="relative">
+          <input id="input-teacher-pwd" type="password" placeholder="請輸入通關密碼 (預設: 8888)" class="w-full bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-center text-sm font-mono tracking-widest text-slate-800 focus:outline-hidden focus:ring-2 focus:ring-purple-500 transition" autocomplete="current-password" autofocus>
+          <button type="button" id="btn-toggle-pwd-visibility" class="absolute right-3.5 top-3.5 text-slate-400 hover:text-slate-600 transition" title="顯示/隱藏密碼">
+            <i data-lucide="eye" class="w-4 h-4" id="icon-pwd-eye"></i>
+          </button>
+        </div>
+
+        <!-- 錯誤提示 -->
+        <div id="pwd-error-msg" class="text-xs font-semibold text-rose-600 hidden flex items-center justify-center space-x-1">
+          <i data-lucide="alert-circle" class="w-3.5 h-3.5"></i>
+          <span id="pwd-error-text">通關密碼不正確，請重新輸入！</span>
+        </div>
+
+        <!-- 記住此設備 -->
+        <div class="flex items-center justify-between text-2xs text-slate-500 px-1">
+          <label class="flex items-center space-x-1.5 cursor-pointer">
+            <input type="checkbox" id="cb-remember-teacher" class="rounded text-purple-600 focus:ring-purple-500">
+            <span>記住此電腦（7天內免輸）</span>
+          </label>
+          <span class="text-slate-400">預設密碼：8888</span>
+        </div>
+
+        <!-- 解鎖按鈕 -->
+        <button id="btn-submit-teacher-pwd" type="submit" class="w-full py-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold rounded-2xl text-sm shadow-md shadow-purple-200 transition">
+          解鎖進入教師看板
+        </button>
+      </form>
+
+      <!-- 底部返回學生端按鈕 -->
+      <div class="mt-6 pt-4 border-t border-slate-100 w-full flex items-center justify-between text-2xs text-slate-400">
+        <a href="index.html" class="hover:text-slate-600 flex items-center transition">
+          <i data-lucide="arrow-left" class="w-3.5 h-3.5 mr-1"></i>返回學生練習端
+        </a>
+        <button id="btn-login-with-google" type="button" class="text-purple-600 hover:text-purple-700 font-semibold flex items-center">
+          <i data-lucide="log-in" class="w-3.5 h-3.5 mr-1"></i>Google 帳號登入
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- 頂部導航列 -->
   <header class="bg-white/95 backdrop-blur-md border-b border-slate-200 sticky top-0 z-40 shadow-xs">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
@@ -62,9 +116,20 @@
           <span>匯出 CSV</span>
         </button>
 
+        <!-- 教師安全防護設定 (修改密碼/學生端隱藏) -->
+        <button id="btn-open-security-modal" type="button" class="p-1.5 rounded-xl text-xs font-medium bg-white hover:bg-slate-100 text-purple-600 border border-slate-200 transition shadow-2xs" title="教師安全與密碼設定">
+          <i data-lucide="shield-check" class="w-4 h-4"></i>
+        </button>
+
         <!-- Firebase 設定按鈕 -->
         <button id="btn-open-firebase-modal" type="button" class="p-1.5 rounded-xl text-xs font-medium bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 transition shadow-2xs" title="Firebase 資料庫連線設定">
           <i data-lucide="settings" class="w-4 h-4"></i>
+        </button>
+
+        <!-- 鎖定看板按鈕 -->
+        <button id="btn-teacher-lock" type="button" class="inline-flex items-center px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 transition shadow-2xs" title="立即鎖定看板，防止學生偷看">
+          <i data-lucide="lock" class="w-3.5 h-3.5 mr-1"></i>
+          <span class="hidden sm:inline">鎖定</span>
         </button>
 
         <!-- 返回學生練習前台 -->
@@ -591,6 +656,59 @@
             儲存並重新連線
           </button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. 教師安全與密碼設定 Modal -->
+  <div id="security-modal" class="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 flex flex-col">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-9 h-9 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
+            <i data-lucide="shield-check" class="w-5 h-5"></i>
+          </div>
+          <div>
+            <h3 class="text-base font-bold text-slate-800">教師安全與入口設定</h3>
+            <p class="text-xs text-slate-400">密碼防護與學生端暗門隱藏開關</p>
+          </div>
+        </div>
+        <button id="btn-close-security-modal" type="button" class="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="space-y-4">
+        <!-- 修改教師通關密碼 -->
+        <div>
+          <label class="block text-2xs font-bold text-slate-700 mb-1">修改教師通關密碼</label>
+          <input id="input-new-teacher-pwd" type="password" placeholder="請輸入新密碼 (至少 4 碼)" class="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-700 mb-2">
+          <input id="input-confirm-teacher-pwd" type="password" placeholder="再次確認新密碼" class="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-700">
+          <p class="text-2xs text-slate-400 mt-1">若忘記密碼，預設重置密碼為 8888。</p>
+        </div>
+
+        <!-- 學生端首頁隱藏開關 -->
+        <div class="p-3.5 bg-purple-50/60 rounded-2xl border border-purple-100 space-y-1.5">
+          <label class="flex items-start space-x-2.5 cursor-pointer">
+            <input type="checkbox" id="cb-hide-teacher-btn" class="mt-0.5 rounded text-purple-600 focus:ring-purple-500">
+            <div>
+              <span class="text-xs font-bold text-purple-950 block">在學生首頁隱藏「教師看板」按鈕</span>
+              <span class="text-2xs text-purple-700/80 leading-relaxed block mt-0.5">
+                開啟後，學生平板上將完全看不到任何教師入口！<br>
+                💡 <b>暗門喚醒方式</b>：在首頁連續點擊 3 次左上角書本 Logo，即可解除隱藏並輸入密碼進入。
+              </span>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <div class="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between">
+        <button id="btn-reset-teacher-pwd-default" type="button" class="text-2xs text-slate-400 hover:text-rose-600 underline">
+          重設為預設密碼 (8888)
+        </button>
+        <button id="btn-save-security-settings" type="button" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl text-xs transition">
+          儲存設定
+        </button>
       </div>
     </div>
   </div>
