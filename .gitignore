@@ -10,3 +10,4 @@ $RECYCLE.BIN/
 .idea/
 *.tmp
 *.log
+.github-pages-publisher.json
